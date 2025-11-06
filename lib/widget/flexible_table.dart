@@ -1,11 +1,20 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+class FlexibleColumn {
+  const FlexibleColumn({required this.title, required this.width});
+
+  final String title;
+  final double width;
+}
+
+////////////////////////////////////////////////////////////////////
+
 class FlexibleTable extends StatefulWidget {
   const FlexibleTable({
     super.key,
     required this.rowCount,
-    required this.columns,
+    required this.headerContents,
     required this.buildLeftCell,
     required this.buildCell,
     this.leftColumnWidth = 120,
@@ -23,7 +32,7 @@ class FlexibleTable extends StatefulWidget {
   final int rowCount;
 
   /// 列定義（可変長）
-  final List<FlexibleColumn> columns;
+  final List<FlexibleColumn> headerContents;
 
   /// 左固定列の幅
   final double leftColumnWidth;
@@ -52,8 +61,8 @@ class FlexibleTable extends StatefulWidget {
   @override
   State<FlexibleTable> createState() => _FlexibleTableState();
 
-  static Widget headerCell(
-    String text, {
+  static Widget headerCell({
+    required String text,
     required double width,
     required double height,
     BoxDecoration decoration = const BoxDecoration(
@@ -74,8 +83,8 @@ class FlexibleTable extends StatefulWidget {
     );
   }
 
-  static Widget bodyCell(
-    String text, {
+  static Widget bodyCell({
+    required String text,
     required double width,
     required double height,
     BoxDecoration decoration = const BoxDecoration(border: Border.fromBorderSide(BorderSide(color: Colors.black54))),
@@ -94,13 +103,6 @@ class FlexibleTable extends StatefulWidget {
   }
 }
 
-class FlexibleColumn {
-  const FlexibleColumn({required this.title, required this.width});
-
-  final String title;
-  final double width;
-}
-
 class _FlexibleTableState extends State<FlexibleTable> {
   late final ScrollController _verticalScrollController;
   late final ScrollController _headerHorizontalScrollController;
@@ -110,7 +112,7 @@ class _FlexibleTableState extends State<FlexibleTable> {
   late final VoidCallback _fromHeaderListener;
   late final VoidCallback _fromBodyListener;
 
-  double get _rightMinWidth => widget.columns.fold<double>(0, (double acc, FlexibleColumn c) => acc + c.width);
+  double get _rightMinWidth => widget.headerContents.fold<double>(0, (double acc, FlexibleColumn c) => acc + c.width);
 
   ///
   @override
@@ -168,6 +170,7 @@ class _FlexibleTableState extends State<FlexibleTable> {
           elevation: 2,
           child: Row(
             children: <Widget>[
+              //---------------------------------------------------------- s
               SizedBox(
                 width: widget.leftColumnWidth,
                 height: widget.headerHeight,
@@ -179,7 +182,11 @@ class _FlexibleTableState extends State<FlexibleTable> {
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                     ),
               ),
+
+              //---------------------------------------------------------- e
               const SizedBox(width: 2),
+
+              //---------------------------------------------------------- s
               Expanded(
                 child: SingleChildScrollView(
                   controller: _headerHorizontalScrollController,
@@ -190,10 +197,10 @@ class _FlexibleTableState extends State<FlexibleTable> {
                       height: widget.headerHeight,
                       child: Row(
                         // ignore: always_specify_types
-                        children: List.generate(widget.columns.length, (int i) {
-                          final FlexibleColumn col = widget.columns[i];
+                        children: List.generate(widget.headerContents.length, (int i) {
+                          final FlexibleColumn col = widget.headerContents[i];
                           return FlexibleTable.headerCell(
-                            col.title,
+                            text: col.title,
                             width: col.width,
                             height: widget.headerHeight,
                             decoration: widget.headerDecoration,
@@ -204,6 +211,8 @@ class _FlexibleTableState extends State<FlexibleTable> {
                   ),
                 ),
               ),
+
+              //---------------------------------------------------------- e
             ],
           ),
         );
@@ -236,9 +245,9 @@ class _FlexibleTableState extends State<FlexibleTable> {
                       children: List.generate(widget.rowCount, (int row) {
                         return Row(
                           // ignore: always_specify_types
-                          children: List.generate(widget.columns.length, (int colIdx) {
+                          children: List.generate(widget.headerContents.length, (int colIdx) {
                             return SizedBox(
-                              width: widget.columns[colIdx].width,
+                              width: widget.headerContents[colIdx].width,
                               height: widget.rowHeight,
                               child: widget.buildCell(context, row, colIdx),
                             );

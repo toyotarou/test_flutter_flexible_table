@@ -10,7 +10,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // static const List<FlexibleColumn> columns4 = <FlexibleColumn>[
+  // static const List<FlexibleColumn> headerContents4 = <FlexibleColumn>[
   //   FlexibleColumn(title: 'AAA', width: 60),
   //   FlexibleColumn(title: 'BBB', width: 140),
   //   FlexibleColumn(title: 'CCC', width: 60),
@@ -20,7 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   //
   //
 
-  static const List<FlexibleColumn> columns6 = <FlexibleColumn>[
+  static const List<FlexibleColumn> headerContents6 = <FlexibleColumn>[
     FlexibleColumn(title: 'A', width: 60),
     FlexibleColumn(title: 'B', width: 140),
     FlexibleColumn(title: 'C', width: 60),
@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ///
   @override
   Widget build(BuildContext context) {
-    const List<FlexibleColumn> columns = columns6;
+    const List<FlexibleColumn> headerContents = headerContents6;
 
     return Scaffold(
       body: SafeArea(
@@ -44,14 +44,14 @@ class _HomeScreenState extends State<HomeScreen> {
             rowCount: 100,
 
             ///
-            columns: columns,
+            headerContents: headerContents,
 
             ///
-            leftHeader: FlexibleTable.headerCell('NUMBER', width: 120, height: 30),
+            leftHeader: FlexibleTable.headerCell(text: 'NUMBER', width: 120, height: 30),
 
             ///
             buildLeftCell: (BuildContext context, int row) {
-              return FlexibleTable.bodyCell(row.toString(), width: 120, height: 50);
+              return FlexibleTable.bodyCell(text: row.toString(), width: 120, height: 50);
             },
 
             ///
