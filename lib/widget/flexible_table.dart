@@ -8,8 +8,6 @@ class FlexibleColumn {
   final double width;
 }
 
-////////////////////////////////////////////////////////////////////
-
 class FlexibleTable extends StatefulWidget {
   const FlexibleTable({
     super.key,
@@ -26,12 +24,14 @@ class FlexibleTable extends StatefulWidget {
       border: Border.fromBorderSide(BorderSide(color: Colors.black54)),
     ),
     this.bodyCellDecoration = const BoxDecoration(border: Border.fromBorderSide(BorderSide(color: Colors.black54))),
+    this.initialScrollToRow,
+    this.autoScrollDuration = const Duration(milliseconds: 400),
   });
 
   /// 行数
   final int rowCount;
 
-  /// 列定義（可変長）
+  /// 列定義（可変）
   final List<FlexibleColumn> headerContents;
 
   /// 左固定列の幅
@@ -55,12 +55,19 @@ class FlexibleTable extends StatefulWidget {
   /// 左固定列のセル
   final Widget Function(BuildContext context, int rowIndex) buildLeftCell;
 
-  /// 右側の1セルを構築（row, colIndex）
+  /// 右側の1セル（row, colIndex）
   final Widget Function(BuildContext context, int rowIndex, int colIndex) buildCell;
+
+  /// 初期スクロール対象の行（0始まり）。null の場合はスクロールしない
+  final int? initialScrollToRow;
+
+  /// 自動スクロールのアニメ時間
+  final Duration autoScrollDuration;
 
   @override
   State<FlexibleTable> createState() => _FlexibleTableState();
 
+  // ヘッダー/ボディの簡易セル
   static Widget headerCell({
     required String text,
     required double width,
@@ -109,12 +116,13 @@ class _FlexibleTableState extends State<FlexibleTable> {
   late final ScrollController _bodyHorizontalScrollController;
 
   bool _syncing = false;
+  bool _didAutoScroll = false;
+
   late final VoidCallback _fromHeaderListener;
   late final VoidCallback _fromBodyListener;
 
   double get _rightMinWidth => widget.headerContents.fold<double>(0, (double acc, FlexibleColumn c) => acc + c.width);
 
-  ///
   @override
   void initState() {
     super.initState();
@@ -148,7 +156,6 @@ class _FlexibleTableState extends State<FlexibleTable> {
     _bodyHorizontalScrollController.addListener(_fromBodyListener);
   }
 
-  ///
   @override
   void dispose() {
     _headerHorizontalScrollController.removeListener(_fromHeaderListener);
@@ -159,7 +166,26 @@ class _FlexibleTableState extends State<FlexibleTable> {
     super.dispose();
   }
 
-  ///
+  void _scheduleInitialScrollIfNeeded() {
+    if (_didAutoScroll) {
+      return;
+    }
+    final int? targetRow = widget.initialScrollToRow;
+    if (targetRow == null) {
+      return;
+    }
+    if (!_verticalScrollController.hasClients) {
+      return;
+    }
+
+    final double rawOffset = widget.rowHeight * targetRow.toDouble();
+    final double max = _verticalScrollController.position.maxScrollExtent;
+    final double target = rawOffset.clamp(0.0, max);
+
+    _didAutoScroll = true;
+    _verticalScrollController.animateTo(target, duration: widget.autoScrollDuration, curve: Curves.easeOut);
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -170,7 +196,6 @@ class _FlexibleTableState extends State<FlexibleTable> {
           elevation: 2,
           child: Row(
             children: <Widget>[
-              //---------------------------------------------------------- s
               SizedBox(
                 width: widget.leftColumnWidth,
                 height: widget.headerHeight,
@@ -182,11 +207,7 @@ class _FlexibleTableState extends State<FlexibleTable> {
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                     ),
               ),
-
-              //---------------------------------------------------------- e
               const SizedBox(width: 2),
-
-              //---------------------------------------------------------- s
               Expanded(
                 child: SingleChildScrollView(
                   controller: _headerHorizontalScrollController,
@@ -211,8 +232,6 @@ class _FlexibleTableState extends State<FlexibleTable> {
                   ),
                 ),
               ),
-
-              //---------------------------------------------------------- e
             ],
           ),
         );
@@ -233,7 +252,6 @@ class _FlexibleTableState extends State<FlexibleTable> {
                 }),
               ),
               const SizedBox(width: 2),
-
               Expanded(
                 child: SingleChildScrollView(
                   controller: _bodyHorizontalScrollController,
@@ -261,6 +279,11 @@ class _FlexibleTableState extends State<FlexibleTable> {
             ],
           ),
         );
+
+        // 初期スクロール（ビルド完了後に実行）
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scheduleInitialScrollIfNeeded();
+        });
 
         return Column(
           children: <Widget>[
