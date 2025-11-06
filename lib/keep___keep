@@ -1,0 +1,437 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+import 'dart:math' as math;
+
+///
+/// 勤怠情報画面
+///
+class HomeScreen extends HookConsumerWidget {
+  const HomeScreen({super.key});
+
+  ///
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final viewDate = useState<DateTime>(DateTime.now());
+
+    final year = viewDate.value.year;
+    final month = viewDate.value.month;
+
+    final prevDate = DateTime(year, month - 1, 1);
+    final nextDate = DateTime(year, month + 1, 1);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Divider(height: 1, thickness: 1),
+
+            // ── 月ナビゲーション
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: () => viewDate.value = prevDate,
+                    style: TextButton.styleFrom(foregroundColor: Colors.black),
+                    child: Text('${prevDate.month}月'),
+                  ),
+                  Row(
+                    children: [
+                      const SizedBox(width: 34),
+                      Text('$year年$month月'),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        icon: const Icon(Icons.calendar_month),
+                        tooltip: '年月を選択',
+                        onPressed: () async {
+                          final picked = await _showYearMonthPicker(context, initial: viewDate.value);
+                          if (picked != null) {
+                            viewDate.value = DateTime(picked.year, picked.month, 1);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  TextButton(
+                    onPressed: () => viewDate.value = nextDate,
+                    style: TextButton.styleFrom(foregroundColor: Colors.black),
+                    child: Text('${nextDate.month}月'),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(height: 1, thickness: 1),
+
+            // ── サマリー（ダミー）
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SummaryRow(labelLeft: '出勤数：', valueLeft: '2日', labelRight: '欠勤・休暇数：', valueRight: '0日'),
+                  SizedBox(height: 8),
+                  Row(children: [Text('総勤務時間：'), Text('17時間')]),
+                ],
+              ),
+            ),
+
+            // ── 表（ヘッダー固定＋左列固定）
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: _FrozenFirstColAttendanceTable(year: year, month: month),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// サマリー行
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
+    required this.labelLeft,
+    required this.valueLeft,
+    required this.labelRight,
+    required this.valueRight,
+  });
+
+  final String labelLeft;
+  final String valueLeft;
+  final String labelRight;
+  final String valueRight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: Row(children: [Text(labelLeft), Text(valueLeft)])),
+        Expanded(child: Row(children: [Text(labelRight), Text(valueRight)])),
+      ],
+    );
+  }
+}
+
+// 固定ヘッダー + 左端固定 + 横スクロール完全同期（ヘッダー連動）
+class _FrozenFirstColAttendanceTable extends HookWidget {
+  const _FrozenFirstColAttendanceTable({required this.year, required this.month});
+
+  final int year;
+  final int month;
+
+  // レイアウト定数
+  static const double _leftColWidth = 120; // 左列幅
+  static const double _headerHeight = 44; // ヘッダー高
+  static const double _rowHeight = 64; // 行高（左右一致用）
+
+  // 右側の列幅（合計は横スクロール対象）
+  static const double _colDuty = 120;
+  static const double _colIn = 140;
+  static const double _colOut = 140;
+  static const double _colTotal = 160;
+  static const double _rightMinWidth = _colDuty + _colIn + _colOut + _colTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    final days = _daysInMonth(year, month);
+
+    // 縦は 1 本だけ（左右まとめて）
+    final vCtrl = useScrollController();
+
+    // 横は「ヘッダー」「本文」で別コントローラを相互同期
+    final hHeaderCtrl = useScrollController();
+    final hBodyCtrl = useScrollController();
+    final syncing = useRef(false);
+
+    useEffect(() {
+      void fromHeader() {
+        if (syncing.value) return;
+        syncing.value = true;
+        if (hBodyCtrl.hasClients) hBodyCtrl.jumpTo(hHeaderCtrl.offset);
+        syncing.value = false;
+      }
+
+      void fromBody() {
+        if (syncing.value) return;
+        syncing.value = true;
+        if (hHeaderCtrl.hasClients) hHeaderCtrl.jumpTo(hBodyCtrl.offset);
+        syncing.value = false;
+      }
+
+      hHeaderCtrl.addListener(fromHeader);
+      hBodyCtrl.addListener(fromBody);
+      return () {
+        hHeaderCtrl.removeListener(fromHeader);
+        hBodyCtrl.removeListener(fromBody);
+      };
+    }, [hHeaderCtrl, hBodyCtrl]);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 右側コンテンツの実幅：画面に収まる場合でも必ず「ヘッダーも」スクロール可能に
+        // （= ヘッダー／本文で全く同じ幅を使う）
+        final double rightContentWidth = math.max(
+          _rightMinWidth,
+          constraints.maxWidth - _leftColWidth - 2, // 左列と区切り2pxを除外
+        );
+
+        // ── ヘッダー（上に固定 / 横はヘッダー用コントローラでスクロール）
+        final header = Material(
+          elevation: 2,
+          child: Row(
+            children: [
+              _headerCell('日付', width: _leftColWidth),
+              const SizedBox(width: 2),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: hHeaderCtrl,
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: rightContentWidth),
+                    child: SizedBox(
+                      height: _headerHeight,
+                      child: Row(
+                        children: [
+                          _headerCell('勤務', width: _colDuty),
+                          _headerCell('出勤時刻', width: _colIn),
+                          _headerCell('退勤時刻', width: _colOut),
+                          _headerCell('勤務時間', width: _colTotal),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        // ── 本文（縦 1 本 / 右は本文用コントローラで横スクロール）
+        final body = SingleChildScrollView(
+          controller: vCtrl,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左列（固定）
+              Column(
+                children: List.generate(days, (i) {
+                  final date = DateTime(year, month, i + 1);
+                  return _leftBodyCell(_formatDateJa(date), width: _leftColWidth, height: _rowHeight);
+                }),
+              ),
+              const SizedBox(width: 2),
+              // 右列（ヘッダーと完全同期）
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: hBodyCtrl,
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: rightContentWidth),
+                    child: Column(
+                      children: List.generate(days, (i) {
+                        final date = DateTime(year, month, i + 1);
+                        final data = _mockAttendanceFor(date);
+                        return Row(
+                          children: [
+                            _rightBodyCell(data.duty, width: _colDuty, height: _rowHeight),
+                            _rightBodyCell(data.clockIns.join('\n'), width: _colIn, height: _rowHeight),
+                            _rightBodyCell(data.clockOuts.join('\n'), width: _colOut, height: _rowHeight),
+                            _rightBodyCell(data.totalHours, width: _colTotal, height: _rowHeight),
+                          ],
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        return Column(
+          children: [
+            header, // ← 常に見える（固定）
+            const SizedBox(height: 2),
+            Expanded(
+              child: Scrollbar(controller: vCtrl, thumbVisibility: true, child: body),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ヘッダーセル
+  Widget _headerCell(String text, {required double width}) {
+    return Container(
+      width: width,
+      height: _headerHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F7F7),
+        border: Border.all(color: Colors.black54, width: 1),
+      ),
+      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+    );
+  }
+
+  // 左列セル（固定）
+  Widget _leftBodyCell(String text, {required double width, required double height}) {
+    return Container(
+      width: width,
+      height: height,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(border: Border.all(color: Colors.black54, width: 1)),
+      child: Text(text),
+    );
+  }
+
+  // 右側セル（横スクロール対象）
+  Widget _rightBodyCell(String text, {required double width, required double height}) {
+    return Container(
+      width: width,
+      height: height,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(border: Border.all(color: Colors.black54, width: 1)),
+      child: Text(text),
+    );
+  }
+}
+
+/// ── ダミーデータ
+class _DayAttendance {
+  _DayAttendance({required this.duty, required this.clockIns, required this.clockOuts, required this.totalHours});
+
+  final String duty;
+  final List<String> clockIns;
+  final List<String> clockOuts;
+  final String totalHours;
+}
+
+_DayAttendance _mockAttendanceFor(DateTime date) {
+  if (date.day == 1) {
+    return _DayAttendance(duty: '出勤', clockIns: const ['7:00'], clockOuts: const ['18:00'], totalHours: '11時間00分');
+  }
+  if (date.day == 2) {
+    return _DayAttendance(
+      duty: '出勤',
+      clockIns: const ['10:58', '14:00'],
+      clockOuts: const ['13:00', '18:00'],
+      totalHours: '6時間00分',
+    );
+  }
+  return _DayAttendance(duty: '', clockIns: const [], clockOuts: const [], totalHours: '');
+}
+
+/// ── 日付フォーマット
+String _formatDateJa(DateTime date) {
+  const youbi = ['日', '月', '火', '水', '木', '金', '土'];
+  return '${date.month}/${date.day}(${youbi[date.weekday % 7]})';
+}
+
+/// ── 月の日数
+int _daysInMonth(int year, int month) => DateTime(year, month + 1, 0).day;
+
+/// ── 年月選択ダイアログ
+Future<DateTime?> _showYearMonthPicker(
+  BuildContext context, {
+  required DateTime initial,
+  int minYear = 2000,
+  int maxYear = 2100,
+}) async {
+  var tempYear = initial.year;
+  var tempMonth = initial.month;
+
+  return showDialog<DateTime>(
+    context: context,
+    builder: (ctx) {
+      final textTheme = Theme.of(ctx).textTheme;
+      return AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              tooltip: '前年',
+              onPressed: () {
+                if (tempYear > minYear) {
+                  tempYear--;
+                  (ctx as Element).markNeedsBuild();
+                }
+              },
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Text('$tempYear年', style: textTheme.titleMedium),
+            IconButton(
+              tooltip: '翌年',
+              onPressed: () {
+                if (tempYear < maxYear) {
+                  tempYear++;
+                  (ctx as Element).markNeedsBuild();
+                }
+              },
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 360,
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: 12,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 2,
+            ),
+            itemBuilder: (context, index) {
+              final m = index + 1;
+              return OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  side: BorderSide(
+                    color: m == tempMonth ? Theme.of(context).colorScheme.primary : Colors.grey.shade400,
+                  ),
+                  backgroundColor: m == tempMonth ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                onPressed: () {
+                  tempMonth = m;
+                  (ctx as Element).markNeedsBuild();
+                },
+                child: Center(
+                  child: Text(
+                    '$m月',
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodyMedium!.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('キャンセル')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(DateTime(tempYear, tempMonth, 1)),
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    },
+  );
+}
